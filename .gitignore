@@ -1,0 +1,26 @@
+# Virtual Environments
+.venv/
+suggest/Include/
+suggest/Lib/
+suggest/Scripts/
+suggest/pyvenv.cfg
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model outputs / artifacts
+model_trainings/models/
+prepare_data/python/artifacts/*.json
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+config.py
+
+
+backend/core/
