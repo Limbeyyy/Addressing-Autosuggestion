@@ -113,26 +113,80 @@ def score_candidates_tflite(prefix, candidates, top_k=15):
 
     return final
 
+import mysql.connector
+from config import DB_CONFIG
+
+#MySQL Database fetch function
+def fetch_db_suggestions(prefix, limit=50):
+    prefix = prefix.lower().strip()
+    if not prefix:
+        return []
+
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cur = conn.cursor()
+
+    query = """
+        SELECT label, rank_score
+        FROM feedback
+        WHERE input LIKE %s
+        ORDER BY rank_score ASC
+        LIMIT %s
+    """
+
+    cur.execute(query, (prefix + "%", int(limit)))
+    rows = cur.fetchall()
+
+    print("DB PREFIX:", prefix)
+    print("DB ROWS:", rows)
+
+
+    cur.close()
+    conn.close()
+
+    # return list of tuples: [(label, rank), ...]
+    return [(label, rank) for label, rank in rows]
+
 # ---------------- SUGGEST FUNCTION ----------------
-def suggest(prefix, top_k=15):
+def suggest(prefix, top_k=50):
     prefix = prefix.lower().strip()
     if not prefix:
         return {"message": "No input provided", "suggestions": []}
 
-    # Hard prefix validation
-    if not any(w.startswith(prefix) for w in english_labels):
-        return {"message": f"No valid match for '{prefix}'", "suggestions": []}
-
-    # Trie search
+    # ---------------- MODEL SUGGESTIONS ----------------
     candidates = searcher.autocomplete(prefix, limit=500)
+    model_suggestions = []
+    if candidates:
+        model_suggestions = score_candidates_tflite(prefix, candidates, top_k)
 
-    if not candidates:
+    # Convert model output to ranked format
+    model_ranked = [(s, 999) for s in model_suggestions]  # model rank = low priority
+
+    # ---------------- DATABASE SUGGESTIONS ----------------
+    db_suggestions = fetch_db_suggestions(prefix, limit=top_k)
+    # db_suggestions → [(label, rank), ...]
+
+    # ---------------- MERGE ----------------
+    combined = {}
+    
+    # DB first (higher priority)
+    for label, rank in db_suggestions:
+        combined[label] = rank
+
+    # Then model suggestions
+    for label, rank in model_ranked:
+        if label not in combined:
+            combined[label] = rank
+
+    # ---------------- SORT BY RANK ----------------
+    final_sorted = sorted(combined.items(), key=lambda x: x[1])
+
+    # Extract only labels
+    final_labels = [label for label, _ in final_sorted][:top_k]
+
+    if not final_labels:
         return {"message": f"No suggestions found for '{prefix}'", "suggestions": []}
 
-    # TFLite scoring
-    suggestions = score_candidates_tflite(prefix, candidates, top_k)
-    return {"suggestions": suggestions}
-
+    return {"suggestions": final_labels}
 
 
 # ---------------- DEBUG CLI ----------------
@@ -140,4 +194,4 @@ if __name__ == '__main__':
     while True:
         q = input('prefix (q to quit): ').strip()
         if q.lower() == 'q': break
-        print('suggestions:', suggest(q, top_k=15))
+        print('suggestions:', suggest(q, top_k=50))
