@@ -33,7 +33,15 @@ TFLITE_MODEL_PATH = PROJECT_ROOT / "model_trainings" / "models" / "model.tflite"
 META_JSON_PATH = PROJECT_ROOT / "model_trainings" / "models" / "meta.json"
 
 # ---------------- FASTAPI SETUP ----------------
-app = FastAPI()
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="Autocomplete API",
+    version="1.0",
+    openapi_url="/autosuggest/openapi.json",  # custom spec URL
+    docs_url=None,  # Disable default docs if you want only manual Swagger
+)
+
 init_db()
 
 app.add_middleware(
@@ -153,37 +161,51 @@ class FeedbackRequest(BaseModel):
 
 # ------------------JWT TOKEN ROutes------------------
 
-@app.post("/token")
+@app.post("/autocomplete/token")
 async def generate_token():
     token = create_token({"user": "yukesh"})
     return {"access_token": token}
 
-@app.post("/suggest")
-async def api_suggest(q: QueryRequest, user=Depends(verify_token)):
-    prefix = q.text.lower().strip()
-    if not prefix:
-        return {"suggestions": []}
 
-    # ---------------- FIXED: STRICT PREFIX MATCH ----------------
-    # Only keep candidates that actually start with prefix
+@app.post("/autocomplete/suggest")
+async def suggestion(q: QueryRequest, user=Depends(verify_token)):
+    prefix = q.text.lower().strip()
+
+    # Always return same response structure
+    if not prefix:
+        return {
+            "data": []
+        }
+
+    # ---------------- STRICT PREFIX MATCH ----------------
     candidates = searcher.autocomplete(prefix, limit=500)
     if not candidates:
-        return {"message": f"No suggestions found for '{prefix}'", "suggestions": []}
+        return {
+            "data": []
+        }
 
     # TFLite scoring + English → Nepali
     suggestions = score_candidates_tflite(prefix, candidates, top_k=20)
 
     if not suggestions:
-        return {"message": f"No suggestions found for '{prefix}'", "suggestions": []}
+        return {
+            "data": []
+        }
 
-    return {"suggestions": suggestions}
+    # ---------------- FINAL RESPONSE FORMAT ----------------
+    return {
+        "data": [
+            {"label": item}
+            for item in suggestions
+        ]
+    }
 
 
-@app.post("/feedback")
-async def api_feedback(f: FeedbackRequest, user=Depends(verify_token)):
+@app.post("/autocomplete/feedback")
+async def feedback(f: FeedbackRequest, user=Depends(verify_token)):
     update_rank(f.input, f.label)
     return {"status": "success"}
 
 # ---------------- SERVER START ----------------
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
