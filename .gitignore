@@ -9,9 +9,6 @@ suggest/pyvenv.cfg
 __pycache__/
 *.pyc
 
-# Model outputs / artifacts
-model_trainings/models/
-prepare_data/python/artifacts/*.json
 
 # IDE files
 .vscode/
@@ -21,6 +18,3 @@ prepare_data/python/artifacts/*.json
 .DS_Store
 Thumbs.db
 config.py
-
-
-backend/core/
