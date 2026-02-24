@@ -18,3 +18,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 config.py
+
+# Environment / secrets — NEVER commit this
+.env
+/suggest

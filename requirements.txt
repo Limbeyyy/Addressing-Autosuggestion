@@ -1,9 +1,24 @@
-pandas
-numpy
-scikit-learn
-joblib
-tensorflow
-rapidfuzz
-uvicorn 
-pydantic 
-fastapi
+# ── Data Processing ──────────────────────────────────────────────────────────
+pandas>=2.0
+numpy>=1.26
+
+# ── Machine Learning / Deep Learning ────────────────────────────────────────
+tensorflow>=2.16          # model training + TFLite inference
+
+# ── Fuzzy Matching ───────────────────────────────────────────────────────────
+rapidfuzz>=3.6
+
+# ── Web API (FastAPI backend) ────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.29   # ASGI server with extras (websockets, httptools)
+pydantic>=2.0
+
+# ── Security (JWT + Fernet encryption) ───────────────────────────────────────
+PyJWT>=2.8                # jwt module used in core/security.py
+cryptography>=42.0        # Fernet used in core/security.py
+
+# ── Database ─────────────────────────────────────────────────────────────────
+mysql-connector-python>=8.3   # mysql.connector used in autocomplete_main + db.py
+
+# ── Environment Variables ──────────────────────────────────────────────────
+python-dotenv
