@@ -16,15 +16,18 @@ def load_to_csv_by_region(df):
 
         filename = export_dir / f"{region.lower()}_{lang.lower()}_output.csv"
 
+        # mode='w' — always overwrite; never append duplicate rows on re-runs
         group_df.to_csv(
             filename,
             index=False,
-            encoding="utf-8-sig"
+            encoding="utf-8-sig",
+            mode="w",
         )
 
         row_count = len(group_df)
         total_rows += row_count
 
-        print(f"{region} | {lang} → {row_count} rows → {filename}")
+        action = "overwritten" if filename.exists() else "created"
+        print(f"{region} | {lang} → {row_count} rows → {filename} [{action}]")
 
     print(f"\nTotal rows exported: {total_rows}")
