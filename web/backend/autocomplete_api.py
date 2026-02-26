@@ -198,12 +198,17 @@ async def lifespan(app: FastAPI):
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
-app = FastAPI(lifespan=lifespan)
-
+app = FastAPI(
+    title="Autosuggest API",
+    version="1.0.0",
+    root_path="/autosuggest-new",  # <- Important
+    openapi_url="/openapi.json",          # optional; can be customized
+    docs_url="/docs"
+)
 # ── CORS — allow browser requests from file:// and any localhost port ────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten in production
+    allow_origins=["https://kataho.app"],          # tighten in production
     allow_methods=["*"],
     allow_headers=["*"],
 )
