@@ -340,15 +340,14 @@ async def suggestion(q: QueryRequest, user: dict = Depends(verify_token)):
     _ensure_ready()
     prefix = q.text.lower().strip()
     if not prefix:
-        return {"data": []}
+        return {"data": [], "message": "No input provided"}
 
     candidates = state.searcher.autocomplete(prefix, limit=500)
     if not candidates:
-        return {"data": []}
+        return {"data": [], "message": "Word not found. Try a different prefix."}
 
     suggestions = _score_candidates(prefix, candidates, top_k=20)
     return {"data": [{"label": item} for item in suggestions]}
-
 
 @app.post("/autocomplete/feedback")
 async def feedback(f: FeedbackRequest, user: dict = Depends(verify_token)):
