@@ -208,9 +208,9 @@ Autosuggestion_Engine/
 
 | Region | Language Codes | Folder Key | Description |
 |--------|----------------|------------|-------------|
-| `nepal` | `nep`, `eng` | `nep` | Nepali Unicode output; input can be English romanization or Nepali |
-| `india` | `hin`, `ben`, `tam`, `tel` | *(lang code)* | Each Indian language uses its own folder |
-| `global` | `eng` | `eng` | General English autocompletion |
+| `nep` | `nep`, `eng` | `nep` | Nepali Unicode output; input can be English romanization or Nepali |
+| `ind` | `hin`, `kannada`, `tamil`, `sanskrit`, `punjabi`, `gujarati` | `ind` | Each Indian language uses the `ind` folder |
+| `global` | `eng` | `english` | General English autocompletion |
 
 > **Folder Key Logic:** The canonical on-disk folder is named after the **target/output language** of the region. For Nepal, all models and artifacts live under `nep/` even when the *input* is English — because the *output* is always Nepali Unicode.
 
@@ -228,8 +228,8 @@ get_config(region, lang)          # → dict of all resolved absolute paths
 prompt_region_and_language()      # → interactive CLI selector → calls get_config()
 
 # Constants:
-SUPPORTED   = {"nepal": ["nep","eng"], "india": [...], "global": ["eng"]}
-FOLDER_KEY  = {"nepal": "nep", "india": None, "global": "eng"}
+SUPPORTED   = {"nep": ["nep","eng"], "ind": ["hin","kannada",...], "global": ["eng"]}
+FOLDER_KEY  = {"nep": "nep", "ind": "ind", "global": "english"}
 DB_CONFIG   = {"host":..., "user":..., "password":..., "database":"autosuggest_db"}
 TOKEN_ACCESS_TIME = 120   # minutes
 ALGORITHM_NAME    = "HS512"
@@ -308,7 +308,9 @@ Output  (probability over all vocabulary words)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/autocomplete/token` | None | Returns an encrypted JWT access token |
+| `GET` | `/autocomplete/status` | None | Returns service readiness and active region/language |
+| `POST` | `/autocomplete/config` | None | Configure region + language; triggers full model initialization |
+| `GET` | `/autocomplete/token` | None | Returns an encrypted JWT access token |
 | `POST` | `/autocomplete/suggest` | Bearer JWT | Returns top-20 suggestions for a prefix |
 | `POST` | `/autocomplete/feedback` | Bearer JWT | Records user's selection in MySQL |
 
@@ -565,9 +567,17 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 ## API Reference Summary
 
-### POST `/autocomplete/token`
+### GET `/autocomplete/status`
 - **Auth:** None
-- **Body:** None
+- **Response:** `{"ready": true, "region": "nep", "language": "eng"}` or `{"ready": false, "region": null, "language": null}`
+
+### POST `/autocomplete/config`
+- **Auth:** None
+- **Body:** `{"region": "nep", "language": "eng"}`
+- **Response:** `{"status": "configured", "region": "nep", "language": "eng"}`
+
+### GET `/autocomplete/token`
+- **Auth:** None (service must be ready)
 - **Response:** `{"access_token": "<fernet_encrypted_jwt>"}`
 
 ### POST `/autocomplete/suggest`

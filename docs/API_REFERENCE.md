@@ -8,16 +8,20 @@
 
 ## Authentication
 
-All endpoints except `/autocomplete/token` require a **Bearer token** in the `Authorization` header.
+Endpoints `/autocomplete/suggest` and `/autocomplete/feedback` require a **Bearer token** in the `Authorization` header.  
+`/autocomplete/status`, `/autocomplete/config`, and `/autocomplete/token` do **not** require authentication.
 
 ### Token Flow
 
 ```
-Step 1: Request a token (no auth required)
-POST /autocomplete/token
+Step 1: (Optional) Configure region + language
+POST /autocomplete/config  {"region": "nep", "language": "eng"}
 
-Step 2: Use the token for all subsequent requests
-Authorization: Bearer <token_from_step_1>
+Step 2: Request a token (no auth required)
+GET /autocomplete/token
+
+Step 3: Use the token for all subsequent requests
+Authorization: Bearer <token_from_step_2>
 ```
 
 ### Token Properties
@@ -43,14 +47,135 @@ Authorization: Bearer <token_from_step_1>
 
 ---
 
-### `POST /autocomplete/token`
+### `GET /autocomplete/status`
 
-Issue a new JWT access token (Fernet-encrypted). No authentication required.
+Returns the current service readiness and active configuration. The frontend polls this on load to determine if the backend is already configured.
 
 **Request**
 ```http
-POST /autocomplete/token
+GET /autocomplete/status
+```
+
+No request body or auth required.
+
+**Response `200 OK` — when ready**
+```json
+{
+  "ready": true,
+  "region": "nep",
+  "language": "eng"
+}
+```
+
+**Response `200 OK` — when not yet configured**
+```json
+{
+  "ready": false,
+  "region": null,
+  "language": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ready` | `boolean` | `true` if model, trie, and DB are fully initialized |
+| `region` | `string \| null` | Active region code (e.g., `"nep"`) or `null` |
+| `language` | `string \| null` | Active language code (e.g., `"eng"`) or `null` |
+
+**Example (curl)**
+```bash
+curl http://localhost:8001/autocomplete/status
+```
+
+**Example (JavaScript)**
+```javascript
+const res = await fetch("http://localhost:8001/autocomplete/status");
+const { ready, region, language } = await res.json();
+if (!ready) {
+  // trigger POST /autocomplete/config
+}
+```
+
+---
+
+### `POST /autocomplete/config`
+
+Configure the service's active region and language. Triggers full initialization: loads the training CSV, builds the Trie, loads the char map and TFLite model, and connects to the database.
+
+Call this once after startup when `REGION`/`LANG` env vars are not set (i.e., when `/autocomplete/status` returns `{"ready": false}`). Can also be called again to **reconfigure** to a different region/language at runtime.
+
+**Request**
+```http
+POST /autocomplete/config
 Content-Type: application/json
+```
+
+**Request Body**
+```json
+{
+  "region": "nep",
+  "language": "eng"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `region` | `string` | ✅ Yes | Region code — must be one of `"nep"`, `"ind"`, `"global"` |
+| `language` | `string` | ✅ Yes | Language code valid for the given region (see table below) |
+
+**Supported region + language combinations:**
+
+| Region | Valid language codes |
+|--------|---------------------|
+| `nep` | `nep`, `eng` |
+| `ind` | `hin`, `kannada`, `tamil`, `sanskrit`, `punjabi`, `gujarati` |
+| `global` | `eng` |
+
+**Response `200 OK`**
+```json
+{
+  "status": "configured",
+  "region": "nep",
+  "language": "eng"
+}
+```
+
+**Error Responses**
+
+| Status | Detail | Cause |
+|--------|--------|-------|
+| `400 Bad Request` | `"Both 'region' and 'language' are required."` | Empty/missing fields |
+| `400 Bad Request` | `"Unsupported region '...' ..."` | Region not in `SUPPORTED` |
+| `400 Bad Request` | `"Language '...' is not available for region '...'"` | Invalid language for region |
+| `404 Not Found` | `"Training CSV not found: ..."` | Model/artifact file missing on disk |
+| `500 Internal Server Error` | `"Initialization failed: ..."` | Any other startup error |
+
+**Example (curl)**
+```bash
+curl -X POST http://localhost:8001/autocomplete/config \
+  -H "Content-Type: application/json" \
+  -d '{"region": "nep", "language": "eng"}'
+```
+
+**Example (JavaScript)**
+```javascript
+const res = await fetch("http://localhost:8001/autocomplete/config", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ region: "nep", language: "eng" })
+});
+const { status, region, language } = await res.json();
+```
+
+---
+
+### `GET /autocomplete/token`
+
+Issue a new JWT access token (Fernet-encrypted). No authentication required. Requires the service to be configured and ready first (call `POST /autocomplete/config` if needed).
+
+**Request**
+```http
+GET /autocomplete/token
 ```
 
 No request body required.
@@ -66,16 +191,20 @@ No request body required.
 |-------|------|-------------|
 | `access_token` | `string` | Fernet-encrypted JWT; pass as Bearer token |
 
+**Error Responses**
+
+| Status | Detail | Cause |
+|--------|--------|-------|
+| `503 Service Unavailable` | `"Service not configured yet. Call POST /autocomplete/config first."` | Service not initialized |
+
 **Example (curl)**
 ```bash
-curl -X POST http://localhost:8001/autocomplete/token
+curl http://localhost:8001/autocomplete/token
 ```
 
 **Example (JavaScript)**
 ```javascript
-const res = await fetch("http://localhost:8001/autocomplete/token", {
-  method: "POST"
-});
+const res = await fetch("http://localhost:8001/autocomplete/token");
 const { access_token } = await res.json();
 // Store token in memory for subsequent requests
 ```
@@ -130,7 +259,7 @@ Authorization: Bearer <access_token>
 { "data": [] }
 ```
 
-**Maximum suggestions returned:** 20 (top_k parameter hardcoded in route handler; up to 500 candidates retrieved from Trie, then ranked by CNN).
+**Maximum suggestions returned:** 20 (top_k parameter; up to 500 candidates retrieved from Trie, then ranked by CNN).
 
 **Example (curl)**
 ```bash
@@ -159,10 +288,9 @@ const { data } = await res.json();
 
 1. Trie BFS retrieves up to 500 prefix-matching candidates
 2. CNN (TFLite) scores each candidate → sorted descending by probability
-3. Input-to-target mapping applied (e.g., "namaste" → "नमस्ते") with deduplication
-4. MySQL feedback table queried: `SELECT label, rank_score WHERE input LIKE 'prefix%'`
-5. Merge: DB results (lower rank_score = higher priority) override model results (fixed score 999)
-6. Return top 20
+3. Input-to-target mapping applied (e.g., `"namaste"` → `"नमस्ते"`) with deduplication
+4. DB feedback merged: rows with lower `rank_score` take priority over model score (999)
+5. Return top 20
 
 ---
 
@@ -219,8 +347,11 @@ curl -X POST http://localhost:8001/autocomplete/feedback \
 | HTTP Status | Condition |
 |-------------|-----------|
 | `200 OK` | All successful responses (including empty suggestion lists) |
+| `400 Bad Request` | Invalid region/language in `/config`, or missing required fields |
 | `401 Unauthorized` | Missing, invalid, or expired Bearer token |
+| `404 Not Found` | Required model/artifact file not found on disk |
 | `422 Unprocessable Entity` | Request body missing required fields / wrong types (Pydantic validation) |
+| `503 Service Unavailable` | Service not initialized — call `POST /autocomplete/config` first |
 | `500 Internal Server Error` | Unhandled server error (check server logs) |
 
 ### 422 Example
@@ -262,6 +393,10 @@ class QueryRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     input: str          # The prefix that was typed
     label: str          # The label the user selected
+
+class ConfigRequest(BaseModel):
+    region: str         # Region code: "nep", "ind", "global"
+    language: str       # Language code valid for the region
 ```
 
 Response types are plain dicts (not typed Pydantic models); Pydantic validates **input** only.
@@ -282,3 +417,4 @@ ALLOWED_ORIGINS = [o.strip() for o in _raw.split(",") if o.strip()] or ["*"]
 ```
 
 CORS allows all methods and headers (`allow_methods=["*"]`, `allow_headers=["*"]`).
+CORS credentials are enabled (`allow_credentials=True`).
