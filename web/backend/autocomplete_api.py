@@ -11,7 +11,8 @@ import uvicorn
 from contextlib import asynccontextmanager
 from collections import deque
 from pathlib import Path
-
+import datetime
+from datetime import datetime, timedelta
 import numpy as np
 import tensorflow as tf
 import pandas as pd
@@ -26,7 +27,7 @@ from database.db import update_rank, get_rank, init_db
 # ── Ensure project root is on path for config imports ────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from config import get_config, PORT, IP_ADDRESS
+from config import get_config, PORT, IP_ADDRESS, TOKEN_EXPIRY_SECONDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -326,7 +327,12 @@ async def generate_token():
     """Issue an encrypted JWT access token."""
     _ensure_ready()
     token = create_token({"sub": "api_client"})
-    return {"access_token": token}
+    expires_at = datetime.utcnow() + timedelta(seconds=TOKEN_EXPIRY_SECONDS)
+    return {
+        "access_token": token,
+        "expires_at": expires_at.isoformat() + "Z",
+        "expires_in": TOKEN_EXPIRY_SECONDS,
+    }
 
 
 @app.post("/autocomplete/suggest")
