@@ -26,51 +26,53 @@ from database.db import update_rank, get_rank, init_db
 # ── Ensure project root is on path for config imports ────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from config import get_config, prompt_region_and_language, PORT, IP_ADDRESS
+from config import get_config, PORT, IP_ADDRESS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 
-# ── Deferred config resolver ──────────────────────────────────────────────────
-#
-#  Config is resolved ONCE inside lifespan (not at import time) to avoid the
-#  double-prompt caused by uvicorn re-importing the module when launched via
-#  `python autocomplete_api.py` (parent process imports → spawns worker which
-#  re-imports the same module at module level).
-#
-#  Two modes (checked in order):
-#  1. ENV VARS  – REGION + LANG set before launch → no prompt, ideal for
-#                 production / Docker / systemd.
-#  2. INTERACTIVE – env vars absent → user is prompted once in the terminal.
-#
-#  Examples:
-#    REGION=nepal LANG=eng uvicorn autocomplete_api:app --host 0.0.0.0 ...
-#    REGION=nepal LANG=nep python autocomplete_api.py
-# ─────────────────────────────────────────────────────────────────────────────
-_CFG: dict | None = None   # populated once by _resolve_config()
+# ── Config state ──────────────────────────────────────────────────────────────
+_CFG: dict | None = None
 
 
-def _resolve_config() -> dict:
-    """Return the config dict, resolving it only on the first call."""
+def _resolve_config(region: str = None, lang: str = None) -> dict:
+    """
+    Resolve config from:
+    1. Explicit region/lang args (from frontend /config call)
+    2. REGION + LANG environment variables (production/Docker)
+    Raises ValueError if neither is available.
+    """
     global _CFG
-    if _CFG is not None:
-        return _CFG
 
-    env_region = os.getenv("REGION", "").strip().lower()
-    env_lang   = os.getenv("LANG",   "").strip().lower()
+    r = (region or os.getenv("REGION", "")).strip().lower()
+    l = (lang   or os.getenv("LANG",   "")).strip().lower()
 
-    if env_region and env_lang:
-        log.info("Config from env vars → REGION=%s  LANG=%s", env_region, env_lang)
-        _CFG = get_config(env_region, env_lang)
-        log.info(
-            "✔  Config loaded → Region: %s | Language: %s [folder: %s]",
-            _CFG["REGION"].capitalize(), _CFG["LANG"].upper(), _CFG.get("FOLDER", _CFG["LANG"]),
-        )
-    else:
-        _CFG = prompt_region_and_language()  
+    if not r or not l:
+        raise ValueError("Region and language are not configured yet. Call /autocomplete/config first.")
 
+    _CFG = get_config(r, l)
+    log.info(
+        "✔  Config loaded → Region: %s | Language: %s [folder: %s]",
+        _CFG["REGION"].capitalize(), _CFG["LANG"].upper(), _CFG.get("FOLDER", _CFG["LANG"]),
+    )
     return _CFG
+
+
+# ── App State ─────────────────────────────────────────────────────────────────
+class _State:
+    ready:           bool = False
+    searcher:        "TrieSearcher | None"       = None
+    interpreter:     "tf.lite.Interpreter | None" = None
+    input_details:   list = []
+    output_details:  list = []
+    char_map:        dict = {}
+    max_len:         int  = 0
+    eng_to_nep:      dict = {}
+    english_labels:  list = []
+
+
+state = _State()
 
 
 # ── Trie ──────────────────────────────────────────────────────────────────────
@@ -111,39 +113,19 @@ class TrieSearcher:
         return results
 
 
-# ── App state (populated during lifespan) ────────────────────────────────────
-class _State:
-    searcher: TrieSearcher
-    interpreter: tf.lite.Interpreter
-    input_details: list
-    output_details: list
-    char_map: dict
-    max_len: int
-    eng_to_nep: dict
-    english_labels: list[str]
+# ── Core initializer (called from lifespan OR /config endpoint) ───────────────
+async def _initialize_from_config(cfg: dict) -> None:
+    """Load all models, trie, and DB using the resolved config dict."""
+    train_csv     = cfg["TRAIN_CSV"]
+    char_map_path = cfg["CHAR_MAP"]
+    tflite_model  = cfg["TFLITE_MODEL"]
+    meta_json     = cfg["META_JSON"]
 
+    log.info("Initializing [Region: %s | Language: %s] ...",
+             cfg["REGION"].capitalize(), cfg["LANG"].upper())
 
-state = _State()
-
-
-# ── Lifespan: all startup/shutdown I/O ───────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # ── Resolve config here (first and only time) ─────────────────────────────
-    cfg          = _resolve_config()
-    train_csv    = cfg["TRAIN_CSV"]
-    char_map_path= cfg["CHAR_MAP"]
-    tflite_model = cfg["TFLITE_MODEL"]
-    meta_json    = cfg["META_JSON"]
-
-    log.info(
-        "Starting up [Region: %s | Language: %s] ...",
-        cfg["REGION"].capitalize(),
-        cfg["LANG"].upper(),
-    )
-
-    # Load CSV data
-    log.info("Loading dataset from: %s", train_csv)
+    # Load CSV
+    log.info("Loading dataset: %s", train_csv)
     if not os.path.exists(train_csv):
         raise FileNotFoundError(f"Training CSV not found: {train_csv}")
     df = pd.read_csv(train_csv, encoding="utf-8")
@@ -159,23 +141,23 @@ async def lifespan(app: FastAPI):
         state.searcher.insert(word)
     log.info("Trie built with %d words", len(state.english_labels))
 
-    # Load char map
-    log.info("Loading char map from: %s", char_map_path)
+    # Char map
+    log.info("Loading char map: %s", char_map_path)
     if not os.path.exists(char_map_path):
         raise FileNotFoundError(f"Char map not found: {char_map_path}")
     with open(char_map_path, encoding="utf-8") as f:
         state.char_map = json.load(f)
 
-    # Load metadata
-    log.info("Loading metadata from: %s", meta_json)
+    # Metadata
+    log.info("Loading metadata: %s", meta_json)
     if not os.path.exists(meta_json):
         raise FileNotFoundError(f"Metadata not found: {meta_json}")
     with open(meta_json, encoding="utf-8") as f:
         meta = json.load(f)
     state.max_len = meta["max_len"]
 
-    # Load TFLite model
-    log.info("Loading TFLite model from: %s", tflite_model)
+    # TFLite model
+    log.info("Loading TFLite model: %s", tflite_model)
     if not os.path.exists(tflite_model):
         raise FileNotFoundError(f"TFLite model not found: {tflite_model}")
     state.interpreter = tf.lite.Interpreter(model_path=str(tflite_model))
@@ -184,10 +166,32 @@ async def lifespan(app: FastAPI):
     state.output_details = state.interpreter.get_output_details()
     log.info("TFLite model loaded.")
 
-    # Initialize database
+    # Database
     init_db()
 
-    log.info("Startup complete. Ready to serve requests.")
+    state.ready = True
+    log.info("✔  Initialization complete. Ready to serve requests.")
+
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Auto-init if env vars are already set (production/Docker mode)
+    env_region = os.getenv("REGION", "").strip().lower()
+    env_lang   = os.getenv("LANG",   "").strip().lower()
+
+    if env_region and env_lang:
+        try:
+            cfg = _resolve_config(env_region, env_lang)
+            await _initialize_from_config(cfg)
+        except Exception as e:
+            log.error("Auto-init from env vars failed: %s", e)
+    else:
+        log.info(
+            "No REGION/LANG env vars found. "
+            "Waiting for frontend to call POST /autocomplete/config ..."
+        )
+
     yield
     log.info("Shutting down.")
 
@@ -195,9 +199,26 @@ async def lifespan(app: FastAPI):
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(lifespan=lifespan)
 
-setup_middleware(app) 
+# ── CORS — allow browser requests from file:// and any localhost port ────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # tighten in production
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+setup_middleware(app)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def _ensure_ready():
+    if not state.ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not configured yet. Call POST /autocomplete/config first.",
+        )
+
+
 def _encode(s: str) -> np.ndarray:
     arr = [state.char_map.get(c, 0) for c in s]
     arr = arr[:state.max_len] if len(arr) >= state.max_len else arr + [0] * (state.max_len - len(arr))
@@ -245,16 +266,72 @@ class FeedbackRequest(BaseModel):
     label: str
 
 
+class ConfigRequest(BaseModel):
+    region: str
+    language: str
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
-@app.post("/autocomplete/token")
+
+@app.get("/autocomplete/status")
+async def get_status():
+    """
+    Returns current configuration status.
+    Frontend polls this on load to check if service is ready.
+    """
+    if state.ready and _CFG:
+        return {
+            "ready":    True,
+            "region":   _CFG.get("REGION", ""),
+            "language": _CFG.get("LANG", ""),
+        }
+    return {"ready": False, "region": None, "language": None}
+
+
+@app.post("/autocomplete/config")
+async def set_config(cfg_req: ConfigRequest):
+    """
+    Called once from the frontend to configure region + language.
+    Triggers full model/trie initialization.
+    """
+    region = cfg_req.region.strip().lower()
+    lang   = cfg_req.language.strip().lower()
+
+    if not region or not lang:
+        raise HTTPException(status_code=400, detail="Both 'region' and 'language' are required.")
+
+    # Allow reconfiguration: reset ready flag
+    state.ready = False
+
+    try:
+        cfg = _resolve_config(region, lang)
+        await _initialize_from_config(cfg)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.exception("Config initialization failed")
+        raise HTTPException(status_code=500, detail=f"Initialization failed: {e}")
+
+    return {
+        "status":   "configured",
+        "region":   _CFG["REGION"],
+        "language": _CFG["LANG"],
+    }
+
+
+@app.get("/autocomplete/token")
 async def generate_token():
     """Issue an encrypted JWT access token."""
+    _ensure_ready()
     token = create_token({"sub": "api_client"})
     return {"access_token": token}
 
 
 @app.post("/autocomplete/suggest")
 async def suggestion(q: QueryRequest, user: dict = Depends(verify_token)):
+    _ensure_ready()
     prefix = q.text.lower().strip()
     if not prefix:
         return {"data": []}
@@ -269,17 +346,11 @@ async def suggestion(q: QueryRequest, user: dict = Depends(verify_token)):
 
 @app.post("/autocomplete/feedback")
 async def feedback(f: FeedbackRequest, user: dict = Depends(verify_token)):
+    _ensure_ready()
     update_rank(f.input, f.label)
     return {"status": "success"}
 
 
 # ── Dev entrypoint ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Resolve config here (in the parent/launcher process) so that when uvicorn
-    # imports this module again internally the env vars are already set and
-    # _resolve_config() skips the prompt entirely → prompt appears exactly once.
-    cfg = _resolve_config()
-    os.environ["REGION"] = cfg["REGION"]   # e.g. "nepal"
-    os.environ["LANG"]   = cfg["LANG"]     # e.g. "nep" or "eng"
-
-    
+    uvicorn.run("autocomplete_api:app", host=IP_ADDRESS, port=PORT, reload=False)
