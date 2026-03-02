@@ -354,10 +354,15 @@ async def suggestion(q: QueryRequest, user: dict = Depends(verify_token)):
     suggestions = _score_candidates(prefix, candidates, top_k=20)
     return {"data": [{"label": item} for item in suggestions]}
 
+
 @app.post("/autocomplete/feedback")
 async def feedback(f: FeedbackRequest, user: dict = Depends(verify_token)):
     _ensure_ready()
-    update_rank(f.input, f.label)
+    
+    region   = _CFG.get("REGION", "") if _CFG else ""
+    language = _CFG.get("LANG", "")   if _CFG else ""
+
+    update_rank(f.input, f.label, region=region, lang=language)
     return {"status": "success"}
 
 

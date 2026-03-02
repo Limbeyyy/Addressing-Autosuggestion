@@ -69,16 +69,16 @@ def init_db():
         conn.close()
 
 
-def update_rank(inp: str, label: str) -> None:
-    """Increment rank_score for an input-label pair (upsert)."""
+def update_rank(inp: str, label: str, region: str = "", lang: str = "") -> None:
+    """Increment rank_score for an input-label pair (upsert)."""    
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO feedback (input, label, rank_score)
-            VALUES (%s, %s, 1)
+            INSERT INTO feedback (input, label, rank_score, region, lang)
+            VALUES (%s, %s, 1, %s, %s)
             ON DUPLICATE KEY UPDATE rank_score = rank_score + 1
-        """, (inp, label))
+        """, (inp, label, region, lang))
         conn.commit()
         cursor.close()
     finally:
