@@ -320,22 +320,10 @@
         <div class="select-wrap">
           <select id="langSelect" name="language" required>
             <option value="" disabled selected>Select a language…</option>
-            <option value="nepali">Nepali (nep)</option>
-            <option value="english">English (eng)</option>
-            <option value="hindi">Hindi (hin)</option>
-            <option value="kannada">Kannada (kan)</option>
-            <option value="tamil">Tamil (tam)</option>
-            <option value="sanskrit">Sanskrit (san)</option>
-            <option value="punjabi">Punjabi (pun)</option>
-            <option value="gujarati">Gujarati (guj)</option>
-            <option value="bengali">Bengali (ben)</option>
-            <option value="sin">Sinhala (sin)</option>
-            <option value="other">Other…</option>
           </select>
         </div>
-        <input type="text" id="langCustom" placeholder="Enter language code (e.g. tam)…" />
+        <input type="text" id="langCustom" placeholder="Enter language code…" style="display:none; margin-top:10px;" />
       </div>
-
       <button class="btn" type="submit" id="submitBtn">Apply Configuration</button>
     </form>
 
@@ -366,6 +354,59 @@
   const regionCustom  = document.getElementById('regionCustom');
   const langSelect    = document.getElementById('langSelect');
   const langCustom    = document.getElementById('langCustom');
+
+
+  const langsByRegion = {
+    nep:    [
+      { value: "nepali",  label: "Nepali (nep)" },
+      { value: "english", label: "English (eng)" },
+    ],
+    ind:    [
+      { value: "hindi",    label: "Hindi (hin)"    },
+      { value: "kannada",  label: "Kannada (kan)"  },
+      { value: "tamil",    label: "Tamil (tam)"    },
+      { value: "sanskrit", label: "Sanskrit (san)" },
+      { value: "punjabi",  label: "Punjabi (pun)"  },
+      { value: "gujarati", label: "Gujarati (guj)" },
+      { value: "bengali",  label: "Bengali (ben)"  },
+      { value: "other",    label: "Other…"         },
+    ],
+    bang:   [
+      { value: "bengali", label: "Bengali (ben)" },
+    ],
+    sri:    [
+      { value: "sin",   label: "Sinhala (sin)" },
+      { value: "tamil", label: "Tamil (tam)"   },
+    ],
+    global: [
+      { value: "other", label: "Other…" },
+    ],
+  };
+
+  function populateLanguages(region) {
+    const langs = langsByRegion[region] || [];
+    langSelect.innerHTML = '<option value="" disabled selected>Select a language…</option>';
+    langs.forEach(({ value, label }) => {
+      const opt   = document.createElement("option");
+      opt.value   = value;
+      opt.textContent = label;
+      langSelect.appendChild(opt);
+    });
+    langCustom.style.display = "none";
+    langCustom.value         = "";
+  }
+
+  regionSelect.addEventListener("change", () => {
+    const val = regionSelect.value;
+    regionCustom.style.display = val === "other" ? "block" : "none";
+    if (val !== "other") regionCustom.value = "";
+    populateLanguages(val);
+  });
+
+  langSelect.addEventListener("change", () => {
+    langCustom.style.display = langSelect.value === "other" ? "block" : "none";
+    if (langSelect.value !== "other") langCustom.value = "";
+  });
 
   // ── Show "Other" input fields when selected ───────────────────────────────
   regionSelect.addEventListener('change', () => {
