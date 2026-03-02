@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Autocomplete · Setup</title>
+  <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
@@ -319,8 +320,8 @@
         <div class="select-wrap">
           <select id="langSelect" name="language" required>
             <option value="" disabled selected>Select a language…</option>
-            <option value="nep">Nepali (nep)</option>
-            <option value="eng">English (eng)</option>
+            <option value="nepali">Nepali (nep)</option>
+            <option value="english">English (eng)</option>
             <option value="hindi">Hindi (hin)</option>
             <option value="kannada">Kannada (kan)</option>
             <option value="tamil">Tamil (tam)</option>
@@ -354,7 +355,7 @@
 
 <script>
   // ── Point directly at your FastAPI server — change port if needed ─────────
-  const API = 'http://127.0.0.1:8000';
+  const API = 'http://127.0.0.1:8001';
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const form          = document.getElementById('configForm');
@@ -445,7 +446,11 @@
       if (res.ok && data.status === 'configured') {
         showStatus(`✓ Configured successfully: ${data.region} / ${data.language}`);
         showCurrentConfig(data.region, data.language);
-      } else {
+        setTimeout(() => {
+          window.location.href = 'home.html';
+        }, 1000); // 1s delay so user sees the success message
+      }
+      else {
         showStatus(data.detail || data.error || 'Configuration failed.', true);
       }
 

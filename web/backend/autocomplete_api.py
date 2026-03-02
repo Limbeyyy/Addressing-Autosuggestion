@@ -365,6 +365,14 @@ async def feedback(f: FeedbackRequest, user: dict = Depends(verify_token)):
     update_rank(f.input, f.label, region=region, lang=language)
     return {"status": "success"}
 
+@app.post("/autocomplete/reset")
+async def reset_config():
+    """Reset service state to uninitialized."""
+    global _CFG
+    state.ready    = False
+    state.searcher = None
+    _CFG           = None
+    return {"status": "reset"}
 
 # ── Dev entrypoint ────────────────────────────────────────────────────────────
 if __name__ == "__main__":

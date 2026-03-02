@@ -4,18 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Autocomplete App</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-
+<button id="logoutBtn" onclick="logout()"> Logout</button>
 <div class="container">
-    <h1>English → Nepali Autocomplete</h1>
+    <h1>Address-Autosuggestion</h1>
     <div class="autocomplete-wrapper">
-        <input type="text" id="autocompleteInput" placeholder="Type English word..." autocomplete="off">
+        <input type="text" id="autocompleteInput" placeholder="Type address word..." autocomplete="off">
         <ul id="suggestionsList"></ul>
     </div>
 </div>
 
-<script src="js/script.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
